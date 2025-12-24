@@ -1,0 +1,90 @@
+{
+  "name": "Nani Pasupuleti",
+  "contact": {
+    "email": "pasupuletinani459@gmail.com",
+    "phone": "+91-9494373379",
+    "linkedin": "https://linkedin.com/in/Nani-pasupuleti",
+    "github": "https://github.com/Nani-Pasupuleti"
+  },
+  "skills": {
+    "backend": [
+      "Java",
+      "Spring Boot",
+      "Python",
+      "SQL",
+      "MySQL",
+      "C"
+    ],
+    "frontend": [
+      "React",
+      "HTML5",
+      "CSS3",
+      "JavaScript"
+    ],
+    "networking_security": [
+      "SSL Inspection",
+      "Firewall Policies",
+      "DNS Policies",
+      "IPv6",
+      "TCP/IP"
+    ],
+    "testing": [
+      "PyTest",
+      "API Testing",
+      "Unit Testing"
+    ],
+    "tools": [
+      "Git",
+      "GitHub",
+      "Postman",
+      "VS Code",
+      "Spring Tool Suite (STS)",
+      "Prompt Engineering"
+    ]
+  },
+  "certifications": [
+    "Oracle Java Programming (Infosys Springboard)",
+    "Amazon Web Services (AWS) (AICTE)",
+    "Frontend Development - CSS (Great Learning)",
+    "Networking (Cisco)",
+    "Databricks (Databricks Academy)"
+  ],
+  "projects": [
+    {
+      "title": "Integrated Dashboard: YouTube & Expense Tracker",
+      "tech_stack": "Java, Spring Boot, React.js, MySQL, YouTube Data API",
+      "description_points": [
+        "Developed a secure Full Stack dashboard featuring dual modules for financial tracking and media consumption, protected by a custom Login system.",
+        "Engineered the Expense Tracker module using Spring Boot and MySQL to categorize expenses and perform efficient CRUD operations.",
+        "Integrated the YouTube Data API to enable real-time video searching within the React UI, implementing seamless redirection logic for content viewing."
+      ]
+    },
+    {
+      "title": "AI Code Quality Reviewer Agent",
+      "tech_stack": "Python, Gemini API, GitHub Actions, REST API",
+      "description_points": [
+        "Built an automated AI Agent integrated with GitHub Actions to review code on every Pull Request automatically.",
+        "Leveraged Google Gemini 2.5 Flash model to analyze code syntax, logic, and security vulnerabilities, providing instant feedback.",
+        "Reduced manual code review time by 40% and improved code quality by catching bugs early in the CI/CD pipeline."
+      ]
+    },
+    {
+      "title": "Automated Resume Tailoring Agent",
+      "tech_stack": "Python, Playwright, Gemini API, LaTeX, Automation",
+      "description_points": [
+        "Developed a robust AI agent using Playwright to scrape job descriptions from complex career portals (Zscaler, IBM, etc.).",
+        "Implemented dynamic LaTeX generation logic that tailors the resume Summary, Skills, and Projects based on specific Job Descriptions.",
+        "Automated the end-to-end application preparation process, ensuring 100% ATS compliance and keyword matching."
+      ]
+    },
+    {
+      "title": "Rice-Grain Quality Analysis using ML",
+      "tech_stack": "Python, OpenCV, CNN, SVM, Image Processing",
+      "description_points": [
+        "Designed an automated system for rice grain quality assessment integrating image processing with machine learning.",
+        "Trained classification models using CNN and SVM to extract features like size, shape, and texture with 95% accuracy.",
+        "Replaced manual inspection methods with a computer vision solution, enhancing consistency and speed."
+      ]
+    }
+  ]
+}

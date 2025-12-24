@@ -1,0 +1,18 @@
+analysis_task:
+  description: >
+    Analyze the Job Description provided in the context.
+    Compare it with the Candidate's Master Profile.
+    
+    1. Assign a Match Score (0-100).
+    2. Provide a short reason for the score.
+  expected_output: >
+    A JSON string containing the score and reason.
+  agent: profile_analyst
+
+generation_task:
+  description: >
+    Create a tailored resume for the specific job.
+    Use the ResumeBuilderTool to generate the .tex file.
+  expected_output: >
+    Confirmation that the resume file was created.
+  agent: latex_developer
