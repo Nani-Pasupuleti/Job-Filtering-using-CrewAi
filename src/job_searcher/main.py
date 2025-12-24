@@ -29,45 +29,118 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 print(f"🤖 Agent initialized using model: {model_name} (Direct Mode)")
 
 
-# --- 1. HYBRID CRAWLER ---
+# --- 1. UNIVERSAL HYBRID CRAWLER ---
 def crawl_jobs(url: str):
     print(f"\n🔹 STEP 1: Scanning Career Page...")
     found_jobs = {}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        # Use a real user agent to avoid being blocked
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
 
+        # --- A. NETWORK SNIFFER (Broadened) ---
         def handle_response(response):
             try:
-                ctype = response.headers.get("content-type", "")
-                if "json" in ctype and ("jobs" in response.url or "search" in response.url):
-                    data = response.json()
-                    job_list = data if isinstance(data, list) else data.get("jobs", [])
-                    if isinstance(job_list, list) and len(job_list) > 0:
-                        print(f"      ⚡ API detected {len(job_list)} jobs!")
-                        for job in job_list:
-                            loc = str(job.get("locations", "")) + str(job.get("location", ""))
-                            if any(x in loc for x in ["India", "Bangalore", "Hyderabad", "Pune"]):
-                                j_url = job.get("absolute_url", "")
-                                if j_url:
-                                    found_jobs[j_url] = {
-                                        "title": job.get("title", ""),
-                                        "url": j_url,
-                                        "content": re.sub(r"<[^<]+?>", "", job.get("content", "")),
-                                    }
-            except Exception:
-                pass
+                # Check if response is JSON
+                if "json" in response.headers.get("content-type", ""):
+                    try:
+                        data = response.json()
+                        
+                        # Handle different API structures (data.jobs, data.results, or direct list)
+                        job_list = []
+                        if isinstance(data, list):
+                            job_list = data
+                        elif isinstance(data, dict):
+                            # Common keys for job lists
+                            for key in ["jobs", "results", "data", "hits", "positions"]:
+                                if key in data and isinstance(data[key], list):
+                                    job_list = data[key]
+                                    break
+                        
+                        if job_list and len(job_list) > 0:
+                            # Basic validation: does the first item look like a job?
+                            first = job_list[0]
+                            if isinstance(first, dict) and ("title" in first or "jobTitle" in first):
+                                print(f"      ⚡ API detected {len(job_list)} potential jobs!")
+                                
+                                for job in job_list:
+                                    # Normalize Keys
+                                    title = job.get("title") or job.get("jobTitle") or job.get("name")
+                                    location = str(job.get("location") or job.get("locations") or job.get("address") or "")
+                                    
+                                    # Construct URL (Handle relative or absolute)
+                                    slug = job.get("url") or job.get("slug") or job.get("externalPath")
+                                    j_url = slug
+                                    if slug and not slug.startswith("http"):
+                                        # Attempt to build full URL from base
+                                        from urllib.parse import urljoin
+                                        j_url = urljoin(url, slug)
+
+                                    # Location Filter (India)
+                                    is_india = any(x in location for x in ["India", "Bangalore", "Hyderabad", "Pune", "Gurgaon", "Noida", "Mumbai", "Chennai", "IN"])
+                                    
+                                    if is_india and title and j_url:
+                                        found_jobs[j_url] = {
+                                            "title": title,
+                                            "url": j_url,
+                                            "content": "" # Will fetch later
+                                        }
+                    except: pass
+            except: pass
 
         page.on("response", handle_response)
 
+        # --- B. VISUAL LOADING ---
         try:
+            print(f"      🌍 Navigating to: {url}")
             page.goto(url, timeout=60000)
-            for _ in range(4):
-                page.mouse.wheel(0, 4000)
-                time.sleep(2)
-        except Exception:
-            pass
+            
+            # Force wait for dynamic content (React/Angular sites)
+            print("      ⏳ Waiting for page to load (5s)...")
+            page.wait_for_load_state("networkidle")
+            time.sleep(5) 
+
+            # Aggressive Scroll to trigger lazy loading
+            print("      📜 Scrolling to load more jobs...")
+            for _ in range(5):
+                page.mouse.wheel(0, 5000)
+                time.sleep(1.5)
+
+            # --- C. VISUAL SCRAPER FALLBACK ---
+            # If API sniffer failed, look for links on the page visually
+            if len(found_jobs) < 5:
+                print("      👀 Parsing visible links on page...")
+                links = page.query_selector_all("a")
+                for link in links:
+                    try:
+                        text = link.inner_text().strip()
+                        href = link.get_attribute("href")
+                        
+                        if not href or len(text) < 4: continue
+                        
+                        # Filter for Job-like titles visually
+                        text_lower = text.lower()
+                        # Must contain tech keywords AND not be a generic link
+                        is_job_link = any(x in text_lower for x in ["engineer", "developer", "analyst", "architect", "lead", "manager"])
+                        is_generic = any(x in text_lower for x in ["read more", "learn more", "apply", "jobs", "careers"])
+                        
+                        if is_job_link and not is_generic:
+                            from urllib.parse import urljoin
+                            full_url = urljoin(url, href)
+                            if full_url not in found_jobs:
+                                found_jobs[full_url] = {
+                                    "title": text,
+                                    "url": full_url,
+                                    "content": ""
+                                }
+                    except: continue
+
+        except Exception as e:
+            print(f"      ⚠️ Crawl Warning: {e}")
         finally:
             browser.close()
 
@@ -76,7 +149,7 @@ def crawl_jobs(url: str):
     return jobs_list
 
 
-# --- 2. FETCH TEXT ---
+# --- 2. FETCH TEXT (FULL CONTENT) ---
 def get_job_text(job: dict) -> str:
     if job.get("content") and len(job["content"]) > 100:
         return job["content"][:6000] 
@@ -86,15 +159,28 @@ def get_job_text(job: dict) -> str:
         try:
             page = browser.new_page()
             page.goto(job["url"], timeout=30000)
-            text = page.inner_text("body")
-            return text[:6000] 
+            
+            # Locate main content - Try common job board selectors
+            content = ""
+            for selector in ["main", "article", ".job-description", "#job-description", ".content"]:
+                try:
+                    if page.locator(selector).count() > 0:
+                        content = page.inner_text(selector)
+                        break
+                except: pass
+            
+            # Fallback to body
+            if not content:
+                content = page.inner_text("body")
+                
+            return content[:6000] 
         except Exception:
             return ""
         finally:
             browser.close()
 
 
-# --- 3. ANALYZE (Smart Holistic Matching) ---
+# --- 3. ANALYZE (Groq) ---
 def analyze_job(job_text: str, title: str) -> dict:
     try:
         with open("data/profile.json", "r", encoding="utf-8") as f:
@@ -102,51 +188,33 @@ def analyze_job(job_text: str, title: str) -> dict:
     except Exception:
         profile = "{}"
 
-    # REVISED PROMPT: CONTEXT-AWARE MATCHER
+    # REVISED PROMPT: AGGRESSIVE & OPTIMISTIC
     prompt = f"""
-    You are an Expert Technical Talent Matcher. 
+    You are an Ambitious Career Coach helping a skilled Engineer get hired.
     
     JOB TITLE: {title}
     JOB DESC: {job_text[:6000]}
+    CANDIDATE PROFILE: {profile}
     
-    CANDIDATE PROFILE (SOURCE OF TRUTH):
-    {profile}
+    STRATEGY:
+    The candidate has ~1-2 years of experience but STRONG SKILLS in Java, Python, AI, and Automation.
+    We apply to anything that matches the SKILLS, even if the "Years of Experience" asked is higher (up to 5-6 years).
     
-    YOUR GOAL: Calculate a relevance score (0-100) based on deep analysis of the candidate's Skills, Projects, and Certifications against the Job Requirements.
+    SCORING RULES:
+    1. **IGNORE EXPERIENCE GAPS**: If the job asks for 3, 4, or 5 years, treat it as a MATCH. Only reject if it explicitly demands 8+ years or Senior Management (Director/VP).
+    2. **SKILLS FIRST**: If the job needs "Python", "AI", "Java", or "Automation", and the candidate has it -> SCORE HIGH (80%+).
+    3. **ROLE FLEXIBILITY**: "Escalation Engineer", "Support Engineer", "SDET" are GREAT MATCHES if they require coding/scripting/Linux.
     
-    --- ANALYSIS RULES ---
-    
-    1. **THE EXPERIENCE RULE (CRITICAL):**
-       - The candidate is Early Career (approx. 1-2 years).
-       - IF the job requires **> 5 years** of experience:
-            - **REJECT (Score 0)** if the candidate's skills are only a "partial" match.
-            - **ACCEPT (Score 80+)** ONLY if the candidate's Tech Stack is a **PERFECT** match (e.g., Job wants exactly Java+Spring+React+AWS, and Candidate has exactly that in Projects).
-            - *Logic:* We ignore the years ONLY if the technical fit is 100%.
-       - IF the job requires **Senior Management** (Director, VP, Principal): **Score 0** immediately.
-    
-    2. **HOLISTIC SKILL VERIFICATION:**
-       - Do not just keyword match the 'skills' list. 
-       - Look for **EVIDENCE** in 'projects' and 'certifications'.
-       - *Example:* If Job wants "AI Agents", check if the Candidate has an "AI Agent" project. (He does: 'AI Code Quality Reviewer').
-       - *Example:* If Job wants "Cloud/AWS", check 'certifications'. (He has: 'Amazon Web Services').
-       - *Example:* If Job wants "Testing", check 'skills'. (He has: 'PyTest', 'API Testing').
-    
-    3. **SCORING ALGORITHM:**
-       - **90-100:** Perfect Tech Stack Match + Relevant Project Evidence + Experience matches (or is ignored due to perfect skill fit).
-       - **75-89:** Strong Tech Stack Match + Relevant Projects. (Good fit).
-       - **50-74:** Partial Skill Match (e.g., matches Backend but not Frontend, or matches AI but not Java).
-       - **< 50:** Irrelevant Role (Sales, HR, Non-Tech) or mismatching Tech Stack (e.g., C++ Embedded, .NET Legacy).
-    
-    --- OUTPUT FORMAT ---
-    
-    Return VALID JSON ONLY. No markdown.
+    OUTPUT JSON:
     {{
-        "matching_skills": ["List of matched skills found in Profile"],
-        "best_projects": ["Title of 1-2 most relevant projects from Profile"],
+        "matching_skills": [],
+        "best_projects": [],
         "score": int, 
-        "reason": "Short summary (e.g., 'Perfect Java/AI match, ignoring 6yr req')",
-        "justification": "2 sentences explaining the score based on Projects/Certs evidence."
+        "reason": "Short summary",
+        "justification": "Why this is a good opportunity. Be optimistic."
     }}
+    
+    Return ONLY JSON.
     """
 
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -163,7 +231,6 @@ def analyze_job(job_text: str, title: str) -> dict:
             
             content = resp.json()["choices"][0]["message"]["content"]
             content = content.replace("```json", "").replace("```", "").strip()
-            
             match = re.search(r"\{.*\}", content, re.DOTALL)
             if match:
                 json_str = match.group(0)
@@ -175,16 +242,15 @@ def analyze_job(job_text: str, title: str) -> dict:
     return {"score": 0, "reason": "Failed", "justification": "Analysis failed.", "matching_skills": [], "best_projects": []}
 
 
-# --- 4. GENERATE RESUME DATA (Strict Extraction) ---
+# --- 4. GENERATE RESUME DATA (Strict Certs) ---
 def generate_resume_data(job_data):
     try:
         with open("data/profile.json", "r", encoding="utf-8") as f:
             profile = f.read()
     except: profile = "{}"
 
-    # REVISED PROMPT: STRICT FILTERING MODE
     prompt = f"""
-    You are a Strict Resume Data Extractor.
+    You are an Expert Resume Writer & ATS Optimizer.
     
     TARGET JOB: {job_data['title']} at {job_data['company']}
     DESCRIPTION: {job_data['description'][:6000]}
@@ -193,24 +259,32 @@ def generate_resume_data(job_data):
     {profile}
     
     YOUR MISSION:
-    Select and filter data from the SOURCE OF TRUTH to create a tailored resume.
+    Create a highly tailored resume JSON object.
     
-    CRITICAL RULES (ZERO HALLUCINATION):
-    1. **SOURCE ONLY**: You are FORBIDDEN from adding any skill, project, or certification that is not explicitly written in the "CANDIDATE SOURCE OF TRUTH" JSON.
-    2. **FILTERING**:
-       - **Skills**: Pick only skills from the JSON that match the Job Description.
-       - **Projects**: Pick exactly 2 projects from the JSON. Do not invent new projects.
-       - **Certifications**: Pick only relevant certifications from the JSON. 
-         * IF Job is Backend/AI -> REMOVE Frontend/CSS certs.
-         * IF Job is Frontend -> REMOVE Cloud/Backend certs.
-         * If no relevant certs exist in JSON, return an empty list [].
+    RULES FOR CONTENT:
+    1. **Summary**: Write 3 punchy bullet points connecting the candidate's existing experience to the job requirements.
+    
+    2. **Skills Summary**: Create a string grouping skills by category.
+       - Format: "Category: Skill, Skill | Category: Skill, Skill".
+       - ONLY include skills relevant to this specific job.
+    
+    3. **Projects**: Select exactly 2 projects from the Profile that prove the candidate can do this specific job.
+    
+    4. **Certifications (STRICT FILTER)**: 
+       - Look at the Job Description. Select ONLY certifications that are **directly relevant**.
+       - **EXCLUDE** unrelated certs. 
+         * Example: If the job is AI/Security, DO NOT include "Frontend/CSS" certifications.
+         * Example: If the job is Backend, DO NOT include "UI/UX" certifications.
+       - Keep only the top 2-3 most impactful certifications for this specific role.
+    
+    DO NOT HALLUCINATE. If the skill/project is not in the JSON, do not invent it.
     
     OUTPUT FORMAT (VALID JSON ONLY):
     {{
-        "summary_points": ["Point 1 (Based on Profile)", "Point 2 (Based on Profile)", "Point 3"],
-        "skills_summary": "Category: Skill, Skill | Category: Skill, Skill",
-        "projects": ["Project Title... Description...", "Project Title... Description..."],
-        "certifications": ["Cert Name 1", "Cert Name 2"]
+        "summary_points": ["Point 1", "Point 2", "Point 3"],
+        "skills_summary": "Backend: Java, SQL | Tools: Git",
+        "projects": ["Project Title 1... Description...", "Project Title 2... Description..."],
+        "certifications": ["Cert 1", "Cert 2"]
     }}
     """
 
@@ -219,13 +293,14 @@ def generate_resume_data(job_data):
     data = {
         "model": model_name, 
         "messages": [{"role": "user", "content": prompt}], 
-        "temperature": 0.0, # Temp 0.0 forces strict adherence to facts
+        "temperature": 0.1,
         "response_format": {"type": "json_object"} 
     }
 
     for attempt in range(3):
         try:
             resp = requests.post(url, headers=headers, json=data, timeout=60)
+            
             if resp.status_code == 429:
                 print(f"      ⚠️ Writing Rate Limit. Sleeping {RESUME_CALL_SLEEP}s...")
                 time.sleep(RESUME_CALL_SLEEP)
@@ -291,7 +366,7 @@ def is_tech_job(title):
 
 # --- MAIN ---
 def run():
-    print(f"\n--- 🤖 JOB AGENT (Senior Mode - With Links) ---")
+    print(f"\n--- 🤖 JOB AGENT (Universal Mode) ---")
     url = input("Enter Career Page URL: ")
 
     jobs = crawl_jobs(url)
@@ -357,7 +432,6 @@ def run():
         
         for idx, j in enumerate(valid_jobs[:limit]):
             print(f"   Writing resume for: {j.get('title')}")
-            # --- Added Link Display Here ---
             print(f"      🔗 Apply Link: {j.get('url')}")
             
             ai_data = generate_resume_data(j)
